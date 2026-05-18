@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
+  AlertCircle,
   AlertTriangle,
   BarChart3,
   ChevronDown,
@@ -15,10 +16,11 @@ import {
   Inbox,
   Loader2,
   MessageCircle,
+  Pencil,
   Phone,
+  RotateCcw,
   SearchX,
   Sparkles,
-  Tag,
   Users,
   X,
 } from "lucide-react";
@@ -38,8 +40,10 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -64,6 +68,7 @@ import {
   formatRICEScore,
   getSegmentLabel,
   getSourceLabel,
+  getSentimentLabel,
   getThemeLabel,
   getTypeLabel,
 } from "@/lib/utils";
@@ -119,7 +124,7 @@ const SOURCE_ICONS: Record<FeedbackSource, LucideIcon> = {
   internal: Users,
 };
 
-// ─── Filter option lists ───────────────────────────────────────────────────
+// ─── Static data ────────────────────────────────────────────────────────────
 
 const ALL_THEMES: Theme[] = [
   "integrations",
@@ -157,7 +162,121 @@ const ALL_SEGMENTS: CustomerSegment[] = [
   "startup",
 ];
 
-// ─── Sub-components ────────────────────────────────────────────────────────
+const ALL_SENTIMENTS: Sentiment[] = ["positive", "neutral", "negative"];
+
+// ─── Shared sub-components ─────────────────────────────────────────────────
+
+function SimpleTooltip({
+  text,
+  children,
+}: {
+  text: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="group/tip relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded border border-border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100 z-50">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+function EditableBadge<T extends string>({
+  value,
+  options,
+  colorMap,
+  getLabelFn,
+  onChange,
+}: {
+  value: T;
+  options: readonly T[];
+  colorMap: Record<string, string>;
+  getLabelFn: (v: T) => string;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "group/badge inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium cursor-pointer transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            colorMap[value]
+          )}
+        >
+          {getLabelFn(value)}
+          <Pencil className="h-2 w-2 flex-shrink-0 opacity-0 transition-opacity group-hover/badge:opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        {options.map((opt) => (
+          <DropdownMenuItem
+            key={opt}
+            onClick={() => onChange(opt)}
+            className={cn(
+              "text-sm",
+              opt === value && "font-semibold bg-accent/50"
+            )}
+          >
+            {getLabelFn(opt)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function EditableSentiment({
+  value,
+  onChange,
+}: {
+  value: Sentiment;
+  onChange: (v: Sentiment) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="group/sent flex items-center gap-1.5 cursor-pointer focus:outline-none"
+        >
+          <div
+            className={cn(
+              "h-2 w-2 rounded-full transition-colors",
+              SENTIMENT_DOT[value]
+            )}
+          />
+          <span className="text-xs text-muted-foreground capitalize">
+            {value}
+          </span>
+          <Pencil className="h-2 w-2 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/sent:opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-36">
+        {ALL_SENTIMENTS.map((s) => (
+          <DropdownMenuItem
+            key={s}
+            onClick={() => onChange(s)}
+            className={cn(
+              "gap-2 text-sm capitalize",
+              s === value && "font-semibold bg-accent/50"
+            )}
+          >
+            <div
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                SENTIMENT_DOT[s]
+              )}
+            />
+            {s}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function FilterDropdown<T extends string>({
   label,
@@ -279,6 +398,7 @@ interface StatsCardProps {
   sub: string;
   iconBg: string;
   iconColor: string;
+  highlight?: boolean;
 }
 
 function StatsCard({
@@ -288,9 +408,16 @@ function StatsCard({
   sub,
   iconBg,
   iconColor,
+  highlight,
 }: StatsCardProps) {
   return (
-    <Card className="overflow-hidden border-border/60 transition-all duration-200 hover:shadow-md hover:-translate-y-px">
+    <Card
+      className={cn(
+        "overflow-hidden border-border/60 transition-all duration-200 hover:shadow-md hover:-translate-y-px",
+        highlight &&
+          "border-amber-500/30 bg-amber-500/[0.02] dark:border-amber-400/25 dark:bg-amber-400/[0.02]"
+      )}
+    >
       <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -318,6 +445,11 @@ function StatsCard({
 
 // ─── Feedback Detail Dialog ─────────────────────────────────────────────────
 
+type AiSnapshot = Pick<
+  FeedbackItem,
+  "theme" | "sentiment" | "feedback_type" | "ai_summary" | "ai_reasoning" | "ai_confidence"
+>;
+
 function FeedbackDetailDialog({
   item,
   onClose,
@@ -328,18 +460,31 @@ function FeedbackDetailDialog({
   onUpdateItem: (updated: FeedbackItem) => void;
 }) {
   const [currentItem, setCurrentItem] = useState<FeedbackItem | null>(item);
+  const [originalAiValues, setOriginalAiValues] = useState<AiSnapshot | null>(null);
+  const [sessionEdited, setSessionEdited] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [aiUpdated, setAiUpdated] = useState(false);
+  const [editingField, setEditingField] = useState<"summary" | "reasoning" | null>(null);
+  const [draftValue, setDraftValue] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync currentItem when the dialog opens with a new item
   useEffect(() => {
     setCurrentItem(item);
-    setAiUpdated(false);
+    setSessionEdited(false);
+    setEditingField(null);
+    setDraftValue("");
+    if (item) {
+      setOriginalAiValues({
+        theme: item.theme,
+        sentiment: item.sentiment,
+        feedback_type: item.feedback_type,
+        ai_summary: item.ai_summary,
+        ai_reasoning: item.ai_reasoning,
+        ai_confidence: item.ai_confidence,
+      });
+    }
   }, [item]);
 
-  // Clear toast timer on unmount
   useEffect(() => {
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -352,9 +497,45 @@ function FeedbackDetailDialog({
     toastTimer.current = setTimeout(() => setToastMessage(null), 4000);
   }
 
+  function applyUpdate(updated: FeedbackItem) {
+    setCurrentItem(updated);
+    onUpdateItem(updated);
+  }
+
+  function handleBadgeChange<K extends "theme" | "sentiment" | "feedback_type">(
+    field: K,
+    value: FeedbackItem[K]
+  ) {
+    if (!currentItem) return;
+    const updated: FeedbackItem = { ...currentItem, [field]: value, user_edited: true };
+    setSessionEdited(true);
+    applyUpdate(updated);
+  }
+
+  function handleFieldSave(field: "ai_summary" | "ai_reasoning") {
+    if (!currentItem) return;
+    const updated: FeedbackItem = {
+      ...currentItem,
+      [field]: draftValue,
+      user_edited: true,
+    };
+    setSessionEdited(true);
+    applyUpdate(updated);
+    setEditingField(null);
+  }
+
+  function handleRevert() {
+    if (!currentItem || !originalAiValues) return;
+    const reverted: FeedbackItem = { ...currentItem, ...originalAiValues, user_edited: false };
+    setSessionEdited(false);
+    setEditingField(null);
+    applyUpdate(reverted);
+  }
+
   async function handleReanalyze() {
     if (!currentItem) return;
     setIsAnalyzing(true);
+    setEditingField(null);
     try {
       const res = await fetch("/api/categorize", {
         method: "POST",
@@ -366,12 +547,9 @@ function FeedbackDetailDialog({
           source: currentItem.source,
         }),
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const updated: FeedbackItem = {
-        ...currentItem,
+      const snap: AiSnapshot = {
         theme: data.theme,
         sentiment: data.sentiment,
         feedback_type: data.feedback_type,
@@ -379,9 +557,10 @@ function FeedbackDetailDialog({
         ai_reasoning: data.ai_reasoning,
         ai_confidence: data.ai_confidence,
       };
-      setCurrentItem(updated);
-      setAiUpdated(true);
-      onUpdateItem(updated);
+      const updated: FeedbackItem = { ...currentItem, ...snap, user_edited: false };
+      setOriginalAiValues(snap);
+      setSessionEdited(false);
+      applyUpdate(updated);
     } catch {
       showToast("Couldn't reach AI service. Try again in a moment.");
     } finally {
@@ -399,6 +578,9 @@ function FeedbackDetailDialog({
           : "text-muted-foreground"
     : "";
 
+  const showLowConfidenceBanner =
+    currentItem?.ai_confidence === "low" && !currentItem.user_edited;
+
   return (
     <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[88vh]">
@@ -408,26 +590,22 @@ function FeedbackDetailDialog({
             <div className="px-5 sm:px-6 pt-6 pb-4 border-b border-border/60 shrink-0">
               <div className="flex items-start gap-3 pr-8">
                 <div className="flex-1 min-w-0 space-y-2">
-                  {/* Type + Theme badges */}
+                  {/* Editable type + theme badges */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[11px] font-medium transition-colors duration-300",
-                        TYPE_COLORS[currentItem.feedback_type]
-                      )}
-                    >
-                      {getTypeLabel(currentItem.feedback_type)}
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[11px] font-medium transition-colors duration-300",
-                        THEME_COLORS[currentItem.theme]
-                      )}
-                    >
-                      {getThemeLabel(currentItem.theme)}
-                    </Badge>
+                    <EditableBadge
+                      value={currentItem.feedback_type}
+                      options={ALL_TYPES}
+                      colorMap={TYPE_COLORS}
+                      getLabelFn={getTypeLabel}
+                      onChange={(v) => handleBadgeChange("feedback_type", v)}
+                    />
+                    <EditableBadge
+                      value={currentItem.theme}
+                      options={ALL_THEMES}
+                      colorMap={THEME_COLORS}
+                      getLabelFn={getThemeLabel}
+                      onChange={(v) => handleBadgeChange("theme", v)}
+                    />
                   </div>
                   {/* Customer name */}
                   <DialogTitle className="text-lg font-bold leading-snug">
@@ -448,23 +626,16 @@ function FeedbackDetailDialog({
                       );
                     })()}
                     <span className="text-xs text-muted-foreground">
-                      {new Date(currentItem.created_at).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      {new Date(currentItem.created_at).toLocaleDateString(
+                        "en-US",
+                        { month: "short", day: "numeric", year: "numeric" }
+                      )}
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      <div
-                        className={cn(
-                          "h-2 w-2 rounded-full transition-colors duration-300",
-                          SENTIMENT_DOT[currentItem.sentiment]
-                        )}
-                      />
-                      <span className="text-xs text-muted-foreground capitalize">
-                        {currentItem.sentiment}
-                      </span>
-                    </div>
+                    {/* Editable sentiment */}
+                    <EditableSentiment
+                      value={currentItem.sentiment}
+                      onChange={(v) => handleBadgeChange("sentiment", v)}
+                    />
                     <Badge
                       variant="outline"
                       className="text-[11px] text-muted-foreground border-border/60"
@@ -489,17 +660,39 @@ function FeedbackDetailDialog({
 
               {/* AI Analysis */}
               <div className="px-5 sm:px-6 py-5 space-y-4 border-b border-border/40">
+                {/* Section header row */}
                 <div className="flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    AI Analysis
-                  </h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI Analysis
+                    </h3>
+                    {currentItem.user_edited && (
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-medium text-muted-foreground border-border/60 gap-1"
+                      >
+                        <Pencil className="h-2.5 w-2.5" />
+                        Edited
+                      </Badge>
+                    )}
+                    {sessionEdited && (
+                      <button
+                        type="button"
+                        onClick={handleRevert}
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        Revert to AI suggestion
+                      </button>
+                    )}
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={isAnalyzing}
                     onClick={handleReanalyze}
-                    className="h-7 gap-1.5 text-[11px] font-medium"
+                    className="h-7 gap-1.5 text-[11px] font-medium shrink-0"
                   >
                     {isAnalyzing ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -510,31 +703,131 @@ function FeedbackDetailDialog({
                   </Button>
                 </div>
 
-                {/* Summary */}
-                <div
-                  className={cn(
-                    "transition-opacity duration-300",
-                    aiUpdated && "animate-pulse-once"
-                  )}
-                >
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                    Summary
-                  </p>
-                  <p className="text-sm leading-relaxed">{currentItem.ai_summary}</p>
-                </div>
-
-                {/* AI Reasoning */}
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                    Reasoning
-                  </p>
-                  <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 dark:border-blue-400/20 dark:bg-blue-400/[0.06] p-4">
-                    <div className="flex gap-3">
-                      <Info className="h-4 w-4 text-blue-500 dark:text-blue-400 mt-0.5 shrink-0" />
-                      <p className="text-sm leading-relaxed text-foreground/85">
-                        {currentItem.ai_reasoning}
+                {/* Low-confidence callout */}
+                {showLowConfidenceBanner && (
+                  <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 dark:border-amber-400/20 dark:bg-amber-400/[0.06] px-4 py-3">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400" />
+                      <p className="text-xs leading-relaxed text-foreground/80">
+                        This categorization has low confidence. Review the AI
+                        reasoning and adjust if needed.
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {/* Summary */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Summary
+                    </p>
+                    {editingField !== "summary" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftValue(currentItem.ai_summary);
+                          setEditingField("summary");
+                        }}
+                        className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {editingField === "summary" ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={draftValue}
+                        onChange={(e) => setDraftValue(e.target.value)}
+                        className="h-9 text-sm"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleFieldSave("ai_summary");
+                          if (e.key === "Escape") setEditingField(null);
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => handleFieldSave("ai_summary")}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={() => setEditingField(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-relaxed">{currentItem.ai_summary}</p>
+                  )}
+                </div>
+
+                {/* Reasoning */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Reasoning
+                    </p>
+                    {editingField !== "reasoning" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftValue(currentItem.ai_reasoning);
+                          setEditingField("reasoning");
+                        }}
+                        className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 dark:border-blue-400/20 dark:bg-blue-400/[0.06] p-4">
+                    {editingField === "reasoning" ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={draftValue}
+                          onChange={(e) => setDraftValue(e.target.value)}
+                          rows={4}
+                          autoFocus
+                          className="flex w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setEditingField(null);
+                          }}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => handleFieldSave("ai_reasoning")}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={() => setEditingField(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-3">
+                        <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
+                        <p className="text-sm leading-relaxed text-foreground/85">
+                          {currentItem.ai_reasoning}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -549,11 +842,11 @@ function FeedbackDetailDialog({
 
               {/* RICE Breakdown */}
               <div className="px-5 sm:px-6 py-5">
-                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+                <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                   <BarChart3 className="h-3.5 w-3.5" />
                   RICE Breakdown
                 </h3>
-                <div className="rounded-lg border border-border/60 overflow-hidden">
+                <div className="overflow-hidden rounded-lg border border-border/60">
                   <table className="w-full text-sm">
                     <tbody>
                       {[
@@ -585,31 +878,31 @@ function FeedbackDetailDialog({
                           key={label}
                           className="border-b border-border/40 last:border-b-0"
                         >
-                          <td className="px-4 py-3 w-28 font-medium text-muted-foreground whitespace-nowrap">
+                          <td className="w-28 whitespace-nowrap px-4 py-3 font-medium text-muted-foreground">
                             {label}
                           </td>
                           <td className="px-4 py-3 font-mono font-semibold tabular-nums">
                             {value}
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell">
+                          <td className="hidden px-4 py-3 text-xs text-muted-foreground sm:table-cell">
                             {desc}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  <div className="flex items-center justify-between bg-muted/40 px-4 py-3.5 border-t border-border/60">
+                  <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-4 py-3.5">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Final RICE Score
                       </p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                      <p className="mt-0.5 text-[10px] text-muted-foreground/60">
                         (Reach × Impact × Confidence) ÷ Effort
                       </p>
                     </div>
                     <span
                       className={cn(
-                        "text-3xl font-bold font-mono tabular-nums",
+                        "font-mono text-3xl font-bold tabular-nums",
                         riceScoreColor
                       )}
                     >
@@ -623,7 +916,7 @@ function FeedbackDetailDialog({
             </div>
 
             {/* ── Footer ──────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-t border-border/60 bg-muted/20 shrink-0">
+            <div className="flex items-center justify-between border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6 shrink-0">
               <Button
                 variant="outline"
                 size="sm"
@@ -641,8 +934,8 @@ function FeedbackDetailDialog({
 
             {/* ── Toast ────────────────────────────────────────────────── */}
             {toastMessage && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-                <div className="rounded-lg border border-border bg-background px-4 py-2.5 shadow-lg text-sm font-medium text-foreground animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="absolute bottom-16 left-1/2 z-50 -translate-x-1/2 pointer-events-none">
+                <div className="animate-in fade-in slide-in-from-bottom-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground shadow-lg duration-200">
                   {toastMessage}
                 </div>
               </div>
@@ -725,19 +1018,20 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
   const [selectedTypes, setSelectedTypes] = useState<Set<FeedbackType>>(
     new Set()
   );
-  const [selectedSegments, setSelectedSegments] = useState<
-    Set<CustomerSegment>
-  >(new Set());
+  const [selectedSegments, setSelectedSegments] = useState<Set<CustomerSegment>>(
+    new Set()
+  );
+  const [needsReview, setNeedsReview] = useState(false);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedItem, setSelectedItem] = useState<FeedbackItem | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
   const [showAbout, setShowAbout] = useState(false);
 
+  // Only update items array — dialog manages its own state via currentItem
   function handleUpdateItem(updated: FeedbackItem) {
     setItems((prev) =>
       prev.map((it) => (it.id === updated.id ? updated : it))
     );
-    setSelectedItem(updated);
   }
 
   const stats = useMemo(() => {
@@ -748,17 +1042,10 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
     const churnCount = items.filter(
       (i) => i.feedback_type === "churn_risk"
     ).length;
-    const themeCounts = items.reduce(
-      (acc, i) => {
-        acc[i.theme] = (acc[i.theme] ?? 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-    const [topTheme, topThemeCount] = Object.entries(themeCounts).sort(
-      ([, a], [, b]) => b - a
-    )[0] as [Theme, number];
-    return { total, avgRice, churnCount, topTheme, topThemeCount };
+    const needsReviewCount = items.filter(
+      (i) => i.ai_confidence === "low" && !i.user_edited
+    ).length;
+    return { total, avgRice, churnCount, needsReviewCount };
   }, [items]);
 
   const visibleItems = useMemo(() => {
@@ -771,6 +1058,10 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
       result = result.filter((i) => selectedTypes.has(i.feedback_type));
     if (selectedSegments.size > 0)
       result = result.filter((i) => selectedSegments.has(i.customer_segment));
+    if (needsReview)
+      result = result.filter(
+        (i) => i.ai_confidence === "low" && !i.user_edited
+      );
     return sortByRICE(result, sortDir);
   }, [
     items,
@@ -778,6 +1069,7 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
     selectedSources,
     selectedTypes,
     selectedSegments,
+    needsReview,
     sortDir,
   ]);
 
@@ -785,13 +1077,15 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
     selectedThemes.size +
     selectedSources.size +
     selectedTypes.size +
-    selectedSegments.size;
+    selectedSegments.size +
+    (needsReview ? 1 : 0);
 
   function clearFilters() {
     setSelectedThemes(new Set());
     setSelectedSources(new Set());
     setSelectedTypes(new Set());
     setSelectedSegments(new Set());
+    setNeedsReview(false);
   }
 
   function makeToggler<T>(
@@ -800,11 +1094,8 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
     return (value: T) =>
       setter((prev) => {
         const next = new Set(prev);
-        if (next.has(value)) {
-          next.delete(value);
-        } else {
-          next.add(value);
-        }
+        if (next.has(value)) next.delete(value);
+        else next.add(value);
         return next;
       });
   }
@@ -872,12 +1163,13 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
             iconColor="text-rose-500"
           />
           <StatsCard
-            icon={Tag}
-            label="Top Theme"
-            value={getThemeLabel(stats.topTheme)}
-            sub={`${stats.topThemeCount} items`}
-            iconBg="bg-emerald-500/10"
-            iconColor="text-emerald-500"
+            icon={AlertCircle}
+            label="Needs Review"
+            value={stats.needsReviewCount}
+            sub="low confidence, unreviewed"
+            iconBg="bg-amber-500/10"
+            iconColor="text-amber-500"
+            highlight
           />
         </div>
 
@@ -953,6 +1245,21 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
               onToggle={toggleSegment}
               getLabel={getSegmentLabel}
             />
+
+            {/* Needs Review toggle */}
+            <Button
+              variant={needsReview ? "secondary" : "outline"}
+              size="sm"
+              className={cn(
+                "h-8 gap-1.5 text-xs font-medium transition-colors",
+                needsReview &&
+                  "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+              )}
+              onClick={() => setNeedsReview((v) => !v)}
+            >
+              <AlertCircle className="h-3 w-3" />
+              Needs Review
+            </Button>
 
             {activeFilterCount > 0 && (
               <Button
@@ -1078,11 +1385,18 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                           {getSegmentLabel(item.customer_segment)}
                         </TableCell>
                         <TableCell className="max-w-xs">
-                          <p className="truncate text-sm text-foreground/80">
-                            {item.ai_summary.length > 80
-                              ? item.ai_summary.slice(0, 80) + "…"
-                              : item.ai_summary}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            {item.ai_confidence === "low" && (
+                              <SimpleTooltip text="Low confidence — review recommended">
+                                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 text-amber-500 dark:text-amber-400" />
+                              </SimpleTooltip>
+                            )}
+                            <p className="truncate text-sm text-foreground/80">
+                              {item.ai_summary.length > 80
+                                ? item.ai_summary.slice(0, 80) + "…"
+                                : item.ai_summary}
+                            </p>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -1148,10 +1462,15 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                             {getThemeLabel(item.theme)}
                           </Badge>
                         </div>
-                        {/* Summary */}
-                        <p className="text-sm font-medium leading-snug line-clamp-2">
-                          {item.ai_summary}
-                        </p>
+                        {/* Summary with low-confidence indicator */}
+                        <div className="flex items-start gap-1.5">
+                          {item.ai_confidence === "low" && (
+                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500 dark:text-amber-400" />
+                          )}
+                          <p className="text-sm font-medium leading-snug line-clamp-2">
+                            {item.ai_summary}
+                          </p>
+                        </div>
                         {/* Meta */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           <SourceCell source={item.source} />

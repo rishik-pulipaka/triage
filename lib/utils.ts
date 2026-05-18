@@ -47,6 +47,15 @@ export function getSentimentColor(sentiment: Sentiment): string {
   }
 }
 
+export function getSentimentLabel(sentiment: Sentiment): string {
+  const labels: Record<Sentiment, string> = {
+    positive: "Positive",
+    neutral: "Neutral",
+    negative: "Negative",
+  };
+  return labels[sentiment];
+}
+
 export function getTypeLabel(type: FeedbackType): string {
   const labels: Record<FeedbackType, string> = {
     feature_request: "Feature Request",

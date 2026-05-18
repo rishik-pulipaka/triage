@@ -5,7 +5,8 @@
       "PowerShell(New-Item *)",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(curl *)"
     ]
   }
 }
