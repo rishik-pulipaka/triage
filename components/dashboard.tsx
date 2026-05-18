@@ -7,7 +7,7 @@ import {
   BarChart3,
   ChevronDown,
   ChevronUp,
-  Edit3,
+  Download,
   ExternalLink,
   Eye,
   Globe,
@@ -45,6 +45,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -54,6 +61,13 @@ import {
 } from "@/components/ui/table";
 import { AnalyticsCharts } from "@/components/analytics-charts";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { trackEvent, type AnalyticsEvent } from "@/lib/analytics";
 import { sortByRICE } from "@/lib/data";
 import type {
   CustomerSegment,
@@ -442,6 +456,118 @@ function StatsCard({
   );
 }
 
+// ─── Analytics Dev Panel ────────────────────────────────────────────────────
+
+function AnalyticsDevPanel({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [events, setEvents] = useState<AnalyticsEvent[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    try {
+      const raw = localStorage.getItem("triage_analytics_events");
+      const all: AnalyticsEvent[] = raw ? (JSON.parse(raw) as AnalyticsEvent[]) : [];
+      setEvents(all.slice(-50).reverse());
+    } catch {
+      setEvents([]);
+    }
+  }, [open]);
+
+  function clearEvents() {
+    try {
+      localStorage.removeItem("triage_analytics_events");
+    } catch {
+      // ignore
+    }
+    setEvents([]);
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl p-0 flex flex-col overflow-hidden"
+      >
+        <SheetHeader className="px-5 pt-5 pb-4 border-b border-border/60 shrink-0">
+          <div className="flex items-center justify-between">
+            <SheetTitle className="text-base flex items-center gap-2">
+              <span>📊</span>
+              Analytics Dev Panel
+            </SheetTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={clearEvents}
+            >
+              Clear Events
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {events.length} event{events.length !== 1 ? "s" : ""} · Ctrl+Shift+A to toggle
+          </p>
+        </SheetHeader>
+        <div className="flex-1 overflow-y-auto">
+          {events.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-center px-6">
+              <p className="text-sm text-muted-foreground">No events yet.</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Interact with the dashboard to generate events.
+              </p>
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-background border-b border-border/60">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground whitespace-nowrap w-[92px]">
+                    Time
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground whitespace-nowrap w-[180px]">
+                    Event
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground">
+                    Properties
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((ev, i) => {
+                  const props = JSON.stringify(ev.properties);
+                  const truncated =
+                    props.length > 80 ? props.slice(0, 80) + "…" : props;
+                  const time = new Date(ev.timestamp).toLocaleTimeString(
+                    "en-US",
+                    { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }
+                  );
+                  return (
+                    <tr
+                      key={i}
+                      className="border-b border-border/30 hover:bg-muted/30 transition-colors"
+                    >
+                      <td className="px-4 py-2.5 font-mono text-muted-foreground">
+                        {time}
+                      </td>
+                      <td className="px-4 py-2.5 font-medium">{ev.event_name}</td>
+                      <td className="px-4 py-2.5 font-mono text-muted-foreground break-all">
+                        {truncated}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // ─── Feedback Detail Dialog ─────────────────────────────────────────────────
 
 type AiSnapshot = Pick<
@@ -460,6 +586,7 @@ function FeedbackDetailDialog({
 }) {
   const [currentItem, setCurrentItem] = useState<FeedbackItem | null>(item);
   const [originalAiValues, setOriginalAiValues] = useState<AiSnapshot | null>(null);
+  const [originalRice, setOriginalRice] = useState<FeedbackItem["rice"] | null>(null);
   const [sessionEdited, setSessionEdited] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [editingField, setEditingField] = useState<"summary" | "reasoning" | null>(null);
@@ -481,6 +608,7 @@ function FeedbackDetailDialog({
         ai_reasoning: item.ai_reasoning,
         ai_confidence: item.ai_confidence,
       });
+      setOriginalRice({ ...item.rice });
     }
   }, [item]);
 
@@ -506,6 +634,12 @@ function FeedbackDetailDialog({
     value: FeedbackItem[K]
   ) {
     if (!currentItem) return;
+    trackEvent("category_override", {
+      field,
+      old_value: currentItem[field] as string,
+      new_value: value as string,
+      item_id: currentItem.id,
+    });
     const updated: FeedbackItem = { ...currentItem, [field]: value, user_edited: true };
     setSessionEdited(true);
     applyUpdate(updated);
@@ -529,6 +663,37 @@ function FeedbackDetailDialog({
     setSessionEdited(false);
     setEditingField(null);
     applyUpdate(reverted);
+  }
+
+  function handleRiceChange(
+    field: "reach" | "impact" | "confidence" | "effort",
+    rawValue: string
+  ) {
+    if (!currentItem) return;
+    const parsed = parseFloat(rawValue);
+    if (isNaN(parsed) || parsed < 0) return;
+    const oldValue = currentItem.rice[field];
+    const newRice = { ...currentItem.rice, [field]: parsed };
+    newRice.score =
+      newRice.effort > 0
+        ? Math.round(
+            (newRice.reach * newRice.impact * newRice.confidence) / newRice.effort
+          )
+        : 0;
+    trackEvent("rice_override", {
+      field,
+      old_value: oldValue,
+      new_value: parsed,
+      item_id: currentItem.id,
+      new_rice_score: newRice.score,
+    });
+    setSessionEdited(true);
+    applyUpdate({ ...currentItem, rice: newRice, user_edited: true });
+  }
+
+  function handleRiceReset() {
+    if (!currentItem || !originalRice) return;
+    applyUpdate({ ...currentItem, rice: { ...originalRice } });
   }
 
   async function handleReanalyze() {
@@ -848,46 +1013,100 @@ function FeedbackDetailDialog({
                 <div className="overflow-hidden rounded-lg border border-border/60">
                   <table className="w-full text-sm">
                     <tbody>
-                      {[
-                        {
-                          label: "Reach",
-                          value: `${currentItem.rice.reach} / 10`,
-                          desc: "users affected per quarter",
-                        },
-                        {
-                          label: "Impact",
-                          value: `${currentItem.rice.impact}×`,
-                          desc: "0.25 → 3.0 scale",
-                        },
-                        {
-                          label: "Confidence",
-                          value: `${currentItem.rice.confidence}%`,
-                          desc: "certainty of estimates",
-                        },
-                        {
-                          label: "Effort",
-                          value:
-                            currentItem.rice.effort === 0
-                              ? "—"
-                              : `${currentItem.rice.effort} wk`,
-                          desc: "person-weeks to build",
-                        },
-                      ].map(({ label, value, desc }) => (
-                        <tr
-                          key={label}
-                          className="border-b border-border/40 last:border-b-0"
-                        >
-                          <td className="w-28 whitespace-nowrap px-4 py-3 font-medium text-muted-foreground">
-                            {label}
-                          </td>
-                          <td className="px-4 py-3 font-mono font-semibold tabular-nums">
-                            {value}
-                          </td>
-                          <td className="hidden px-4 py-3 text-xs text-muted-foreground sm:table-cell">
-                            {desc}
-                          </td>
-                        </tr>
-                      ))}
+                      {/* Reach */}
+                      <tr className="border-b border-border/40">
+                        <td className="w-28 whitespace-nowrap px-4 py-2.5 font-medium text-muted-foreground">
+                          Reach
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              step={1}
+                              value={currentItem.rice.reach}
+                              onChange={(e) => handleRiceChange("reach", e.target.value)}
+                              className="w-10 bg-transparent border-b border-transparent font-mono font-semibold tabular-nums text-sm focus:border-primary focus:outline-none hover:border-border/60 transition-colors text-foreground"
+                            />
+                            <span className="text-xs text-muted-foreground font-mono">/ 10</span>
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-xs text-muted-foreground sm:table-cell">
+                          users affected per quarter
+                        </td>
+                      </tr>
+                      {/* Impact */}
+                      <tr className="border-b border-border/40">
+                        <td className="w-28 whitespace-nowrap px-4 py-2.5 font-medium text-muted-foreground">
+                          Impact
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Select
+                            value={String(currentItem.rice.impact)}
+                            onValueChange={(v) => handleRiceChange("impact", v)}
+                          >
+                            <SelectTrigger className="h-auto w-auto min-w-0 rounded-none border-0 border-b border-transparent bg-transparent px-0 py-0 font-mono font-semibold text-sm text-foreground hover:border-border/60 focus:ring-0 focus:border-primary transition-colors gap-1 [&>span]:line-clamp-none">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[0.25, 0.5, 1, 2, 3].map((v) => (
+                                <SelectItem key={v} value={String(v)}>
+                                  {v}×
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-xs text-muted-foreground sm:table-cell">
+                          0.25 → 3.0 scale
+                        </td>
+                      </tr>
+                      {/* Confidence */}
+                      <tr className="border-b border-border/40">
+                        <td className="w-28 whitespace-nowrap px-4 py-2.5 font-medium text-muted-foreground">
+                          Confidence
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-0.5">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={5}
+                              value={currentItem.rice.confidence}
+                              onChange={(e) => handleRiceChange("confidence", e.target.value)}
+                              className="w-12 bg-transparent border-b border-transparent font-mono font-semibold tabular-nums text-sm focus:border-primary focus:outline-none hover:border-border/60 transition-colors text-foreground"
+                            />
+                            <span className="text-xs text-muted-foreground font-mono">%</span>
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-xs text-muted-foreground sm:table-cell">
+                          certainty of estimates
+                        </td>
+                      </tr>
+                      {/* Effort */}
+                      <tr>
+                        <td className="w-28 whitespace-nowrap px-4 py-2.5 font-medium text-muted-foreground">
+                          Effort
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={currentItem.rice.effort || ""}
+                              onChange={(e) => handleRiceChange("effort", e.target.value)}
+                              className="w-12 bg-transparent border-b border-transparent font-mono font-semibold tabular-nums text-sm focus:border-primary focus:outline-none hover:border-border/60 transition-colors text-foreground"
+                            />
+                            <span className="text-xs text-muted-foreground">wk</span>
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-xs text-muted-foreground sm:table-cell">
+                          person-weeks to build
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                   <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-4 py-3.5">
@@ -901,7 +1120,7 @@ function FeedbackDetailDialog({
                     </div>
                     <span
                       className={cn(
-                        "font-mono text-3xl font-bold tabular-nums",
+                        "font-mono text-3xl font-bold tabular-nums transition-colors duration-150",
                         riceScoreColor
                       )}
                     >
@@ -911,21 +1130,20 @@ function FeedbackDetailDialog({
                     </span>
                   </div>
                 </div>
+                {/* Reset RICE */}
+                <button
+                  type="button"
+                  onClick={handleRiceReset}
+                  className="mt-2.5 flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  Reset RICE to AI suggestion
+                </button>
               </div>
             </div>
 
             {/* ── Footer ──────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6 shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled
-                className="gap-1.5 text-xs opacity-50 cursor-not-allowed"
-                title="Coming in v2"
-              >
-                <Edit3 className="h-3.5 w-3.5" />
-                Edit RICE
-              </Button>
+            <div className="flex items-center justify-end border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6 shrink-0">
               <DialogClose asChild>
                 <Button size="sm">Close</Button>
               </DialogClose>
@@ -1025,12 +1243,83 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
   const [selectedItem, setSelectedItem] = useState<FeedbackItem | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
   const [showAbout, setShowAbout] = useState(false);
+  const [devPanelOpen, setDevPanelOpen] = useState(false);
+  const [exportToast, setExportToast] = useState<string | null>(null);
+  const exportToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionStartTime = useRef<number>(Date.now());
 
   // Only update items array — dialog manages its own state via currentItem
   function handleUpdateItem(updated: FeedbackItem) {
     setItems((prev) =>
       prev.map((it) => (it.id === updated.id ? updated : it))
     );
+  }
+
+  useEffect(() => {
+    sessionStartTime.current = Date.now();
+    trackEvent("session_started");
+
+    const handleBeforeUnload = () => {
+      const duration = Math.round((Date.now() - sessionStartTime.current) / 1000);
+      trackEvent("session_ended", { duration_seconds: duration });
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "A") {
+        e.preventDefault();
+        setDevPanelOpen((v) => !v);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (exportToastTimer.current) clearTimeout(exportToastTimer.current);
+    };
+  }, []);
+
+  function openDetail(item: FeedbackItem) {
+    trackEvent("detail_dialog_opened", { item_id: item.id });
+    trackEvent("feedback_item_viewed", {
+      item_id: item.id,
+      theme: item.theme,
+      ai_confidence: item.ai_confidence,
+    });
+    setSelectedItem(item);
+  }
+
+  function handleExportRoadmap() {
+    const headers = [
+      "id", "theme", "type", "sentiment",
+      "customer_name", "customer_segment", "rice_score", "raw_text",
+    ];
+    function q(val: string | number): string {
+      if (typeof val === "number") return String(val);
+      return `"${String(val).replace(/"/g, '""')}"`;
+    }
+    const rows = visibleItems.map((item) =>
+      [
+        q(item.id),
+        q(item.theme),
+        q(item.feedback_type),
+        q(item.sentiment),
+        q(item.customer_name),
+        q(item.customer_segment),
+        q(item.rice.score),
+        q(item.raw_text),
+      ].join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+    navigator.clipboard.writeText(csv).then(() => {
+      trackEvent("roadmap_exported", { item_count: visibleItems.length });
+      setExportToast("Roadmap copied to clipboard ✓");
+      if (exportToastTimer.current) clearTimeout(exportToastTimer.current);
+      exportToastTimer.current = setTimeout(() => setExportToast(null), 3000);
+    }).catch(() => {
+      setExportToast("Export failed — clipboard access denied");
+      if (exportToastTimer.current) clearTimeout(exportToastTimer.current);
+      exportToastTimer.current = setTimeout(() => setExportToast(null), 3000);
+    });
   }
 
   const stats = useMemo(() => {
@@ -1087,22 +1376,38 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
     setNeedsReview(false);
   }
 
-  function makeToggler<T>(
-    setter: React.Dispatch<React.SetStateAction<Set<T>>>
-  ) {
-    return (value: T) =>
-      setter((prev) => {
-        const next = new Set(prev);
-        if (next.has(value)) next.delete(value);
-        else next.add(value);
-        return next;
-      });
+  function toggleTheme(v: Theme) {
+    trackEvent("filter_applied", { filter_type: "theme", filter_value: v });
+    setSelectedThemes((prev) => {
+      const n = new Set(prev);
+      if (n.has(v)) { n.delete(v); } else { n.add(v); }
+      return n;
+    });
   }
-
-  const toggleTheme = makeToggler(setSelectedThemes);
-  const toggleSource = makeToggler(setSelectedSources);
-  const toggleType = makeToggler(setSelectedTypes);
-  const toggleSegment = makeToggler(setSelectedSegments);
+  function toggleSource(v: FeedbackSource) {
+    trackEvent("filter_applied", { filter_type: "source", filter_value: v });
+    setSelectedSources((prev) => {
+      const n = new Set(prev);
+      if (n.has(v)) { n.delete(v); } else { n.add(v); }
+      return n;
+    });
+  }
+  function toggleType(v: FeedbackType) {
+    trackEvent("filter_applied", { filter_type: "type", filter_value: v });
+    setSelectedTypes((prev) => {
+      const n = new Set(prev);
+      if (n.has(v)) { n.delete(v); } else { n.add(v); }
+      return n;
+    });
+  }
+  function toggleSegment(v: CustomerSegment) {
+    trackEvent("filter_applied", { filter_type: "segment", filter_value: v });
+    setSelectedSegments((prev) => {
+      const n = new Set(prev);
+      if (n.has(v)) { n.delete(v); } else { n.add(v); }
+      return n;
+    });
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -1128,6 +1433,15 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
               onClick={() => setShowAbout(true)}
             >
               About
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs font-medium"
+              onClick={handleExportRoadmap}
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Export Roadmap</span>
             </Button>
             <ThemeToggle />
           </div>
@@ -1254,7 +1568,13 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                 needsReview &&
                   "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
               )}
-              onClick={() => setNeedsReview((v) => !v)}
+              onClick={() => {
+                trackEvent("filter_applied", {
+                  filter_type: "needs_review",
+                  filter_value: !needsReview,
+                });
+                setNeedsReview((v) => !v);
+              }}
             >
               <AlertCircle className="h-3 w-3" />
               Needs Review
@@ -1346,10 +1666,10 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                       <TableRow
                         key={item.id}
                         className="group cursor-pointer border-b border-border/40 transition-colors hover:bg-muted/40 focus-within:bg-muted/40 outline-none"
-                        onClick={() => setSelectedItem(item)}
+                        onClick={() => openDetail(item)}
                         tabIndex={0}
                         onKeyDown={(e) =>
-                          e.key === "Enter" && setSelectedItem(item)
+                          e.key === "Enter" && openDetail(item)
                         }
                       >
                         <TableCell className="pl-4">
@@ -1417,7 +1737,7 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                             className="h-7 gap-1 px-2 text-[11px] opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedItem(item);
+                              openDetail(item);
                             }}
                           >
                             <Eye className="h-3 w-3" />
@@ -1436,7 +1756,7 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
                   <button
                     key={item.id}
                     className="w-full text-left p-4 hover:bg-muted/40 focus:bg-muted/40 focus:outline-none active:bg-muted/60 transition-colors"
-                    onClick={() => setSelectedItem(item)}
+                    onClick={() => openDetail(item)}
                   >
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0 space-y-2">
@@ -1527,6 +1847,19 @@ export function Dashboard({ items: initialItems }: DashboardProps) {
         onUpdateItem={handleUpdateItem}
       />
       <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
+      <AnalyticsDevPanel
+        open={devPanelOpen}
+        onClose={() => setDevPanelOpen(false)}
+      />
+
+      {/* Export toast */}
+      {exportToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 pointer-events-none">
+          <div className="animate-in fade-in slide-in-from-bottom-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground shadow-lg duration-200">
+            {exportToast}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
