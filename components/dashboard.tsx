@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -13,6 +13,7 @@ import {
   Hash,
   Info,
   Inbox,
+  Loader2,
   MessageCircle,
   Phone,
   SearchX,
@@ -320,16 +321,80 @@ function StatsCard({
 function FeedbackDetailDialog({
   item,
   onClose,
+  onUpdateItem,
 }: {
   item: FeedbackItem | null;
   onClose: () => void;
+  onUpdateItem: (updated: FeedbackItem) => void;
 }) {
-  const riceScoreColor = item
-    ? item.rice.score >= 1000
+  const [currentItem, setCurrentItem] = useState<FeedbackItem | null>(item);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiUpdated, setAiUpdated] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync currentItem when the dialog opens with a new item
+  useEffect(() => {
+    setCurrentItem(item);
+    setAiUpdated(false);
+  }, [item]);
+
+  // Clear toast timer on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  function showToast(msg: string) {
+    setToastMessage(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMessage(null), 4000);
+  }
+
+  async function handleReanalyze() {
+    if (!currentItem) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch("/api/categorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          raw_text: currentItem.raw_text,
+          customer_name: currentItem.customer_name,
+          customer_segment: currentItem.customer_segment,
+          source: currentItem.source,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const updated: FeedbackItem = {
+        ...currentItem,
+        theme: data.theme,
+        sentiment: data.sentiment,
+        feedback_type: data.feedback_type,
+        ai_summary: data.ai_summary,
+        ai_reasoning: data.ai_reasoning,
+        ai_confidence: data.ai_confidence,
+      };
+      setCurrentItem(updated);
+      setAiUpdated(true);
+      onUpdateItem(updated);
+    } catch {
+      showToast("Couldn't reach AI service. Try again in a moment.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  const riceScoreColor = currentItem
+    ? currentItem.rice.score >= 1000
       ? "text-amber-500 dark:text-amber-400"
-      : item.rice.score >= 500
+      : currentItem.rice.score >= 500
         ? "text-blue-500 dark:text-blue-400"
-        : item.rice.score >= 200
+        : currentItem.rice.score >= 200
           ? "text-foreground"
           : "text-muted-foreground"
     : "";
@@ -337,7 +402,7 @@ function FeedbackDetailDialog({
   return (
     <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[88vh]">
-        {item && (
+        {currentItem && (
           <>
             {/* ── Header ──────────────────────────────────────────────── */}
             <div className="px-5 sm:px-6 pt-6 pb-4 border-b border-border/60 shrink-0">
@@ -348,42 +413,42 @@ function FeedbackDetailDialog({
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-[11px] font-medium",
-                        TYPE_COLORS[item.feedback_type]
+                        "text-[11px] font-medium transition-colors duration-300",
+                        TYPE_COLORS[currentItem.feedback_type]
                       )}
                     >
-                      {getTypeLabel(item.feedback_type)}
+                      {getTypeLabel(currentItem.feedback_type)}
                     </Badge>
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-[11px] font-medium",
-                        THEME_COLORS[item.theme]
+                        "text-[11px] font-medium transition-colors duration-300",
+                        THEME_COLORS[currentItem.theme]
                       )}
                     >
-                      {getThemeLabel(item.theme)}
+                      {getThemeLabel(currentItem.theme)}
                     </Badge>
                   </div>
                   {/* Customer name */}
                   <DialogTitle className="text-lg font-bold leading-snug">
-                    {item.customer_name}
+                    {currentItem.customer_name}
                   </DialogTitle>
                   {/* Meta row */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     {(() => {
-                      const SourceIcon = SOURCE_ICONS[item.source];
+                      const SourceIcon = SOURCE_ICONS[currentItem.source];
                       return (
                         <Badge
                           variant="secondary"
                           className="gap-1.5 text-[11px] font-medium"
                         >
                           <SourceIcon className="h-3 w-3" />
-                          {getSourceLabel(item.source)}
+                          {getSourceLabel(currentItem.source)}
                         </Badge>
                       );
                     })()}
                     <span className="text-xs text-muted-foreground">
-                      {new Date(item.created_at).toLocaleDateString("en-US", {
+                      {new Date(currentItem.created_at).toLocaleDateString("en-US", {
                         month: "short",
                         day: "numeric",
                         year: "numeric",
@@ -392,19 +457,19 @@ function FeedbackDetailDialog({
                     <div className="flex items-center gap-1.5">
                       <div
                         className={cn(
-                          "h-2 w-2 rounded-full",
-                          SENTIMENT_DOT[item.sentiment]
+                          "h-2 w-2 rounded-full transition-colors duration-300",
+                          SENTIMENT_DOT[currentItem.sentiment]
                         )}
                       />
                       <span className="text-xs text-muted-foreground capitalize">
-                        {item.sentiment}
+                        {currentItem.sentiment}
                       </span>
                     </div>
                     <Badge
                       variant="outline"
                       className="text-[11px] text-muted-foreground border-border/60"
                     >
-                      {getSegmentLabel(item.customer_segment)}
+                      {getSegmentLabel(currentItem.customer_segment)}
                     </Badge>
                   </div>
                 </div>
@@ -417,27 +482,48 @@ function FeedbackDetailDialog({
               <div className="px-5 sm:px-6 py-5 border-b border-border/40">
                 <blockquote className="border-l-[3px] border-primary/30 pl-4 py-0.5">
                   <p className="text-base italic leading-relaxed text-foreground/80">
-                    &#8220;{item.raw_text}&#8221;
+                    &#8220;{currentItem.raw_text}&#8221;
                   </p>
                 </blockquote>
               </div>
 
               {/* AI Analysis */}
               <div className="px-5 sm:px-6 py-5 space-y-4 border-b border-border/40">
-                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  AI Analysis
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI Analysis
+                  </h3>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isAnalyzing}
+                    onClick={handleReanalyze}
+                    className="h-7 gap-1.5 text-[11px] font-medium"
+                  >
+                    {isAnalyzing ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {isAnalyzing ? "Analyzing…" : "Re-analyze with AI"}
+                  </Button>
+                </div>
 
                 {/* Summary */}
-                <div>
+                <div
+                  className={cn(
+                    "transition-opacity duration-300",
+                    aiUpdated && "animate-pulse-once"
+                  )}
+                >
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Summary
                   </p>
-                  <p className="text-sm leading-relaxed">{item.ai_summary}</p>
+                  <p className="text-sm leading-relaxed">{currentItem.ai_summary}</p>
                 </div>
 
-                {/* AI Reasoning — prominent trust callout */}
+                {/* AI Reasoning */}
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Reasoning
@@ -446,7 +532,7 @@ function FeedbackDetailDialog({
                     <div className="flex gap-3">
                       <Info className="h-4 w-4 text-blue-500 dark:text-blue-400 mt-0.5 shrink-0" />
                       <p className="text-sm leading-relaxed text-foreground/85">
-                        {item.ai_reasoning}
+                        {currentItem.ai_reasoning}
                       </p>
                     </div>
                   </div>
@@ -457,7 +543,7 @@ function FeedbackDetailDialog({
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     AI Confidence
                   </span>
-                  <ConfidenceBadge level={item.ai_confidence} />
+                  <ConfidenceBadge level={currentItem.ai_confidence} />
                 </div>
               </div>
 
@@ -473,25 +559,25 @@ function FeedbackDetailDialog({
                       {[
                         {
                           label: "Reach",
-                          value: `${item.rice.reach} / 10`,
+                          value: `${currentItem.rice.reach} / 10`,
                           desc: "users affected per quarter",
                         },
                         {
                           label: "Impact",
-                          value: `${item.rice.impact}×`,
+                          value: `${currentItem.rice.impact}×`,
                           desc: "0.25 → 3.0 scale",
                         },
                         {
                           label: "Confidence",
-                          value: `${item.rice.confidence}%`,
+                          value: `${currentItem.rice.confidence}%`,
                           desc: "certainty of estimates",
                         },
                         {
                           label: "Effort",
                           value:
-                            item.rice.effort === 0
+                            currentItem.rice.effort === 0
                               ? "—"
-                              : `${item.rice.effort} wk`,
+                              : `${currentItem.rice.effort} wk`,
                           desc: "person-weeks to build",
                         },
                       ].map(({ label, value, desc }) => (
@@ -527,9 +613,9 @@ function FeedbackDetailDialog({
                         riceScoreColor
                       )}
                     >
-                      {item.rice.score === 0
+                      {currentItem.rice.score === 0
                         ? "—"
-                        : formatRICEScore(item.rice.score)}
+                        : formatRICEScore(currentItem.rice.score)}
                     </span>
                   </div>
                 </div>
@@ -552,6 +638,15 @@ function FeedbackDetailDialog({
                 <Button size="sm">Close</Button>
               </DialogClose>
             </div>
+
+            {/* ── Toast ────────────────────────────────────────────────── */}
+            {toastMessage && (
+              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+                <div className="rounded-lg border border-border bg-background px-4 py-2.5 shadow-lg text-sm font-medium text-foreground animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  {toastMessage}
+                </div>
+              </div>
+            )}
           </>
         )}
       </DialogContent>
@@ -621,7 +716,8 @@ interface DashboardProps {
   items: FeedbackItem[];
 }
 
-export function Dashboard({ items }: DashboardProps) {
+export function Dashboard({ items: initialItems }: DashboardProps) {
+  const [items, setItems] = useState<FeedbackItem[]>(initialItems);
   const [selectedThemes, setSelectedThemes] = useState<Set<Theme>>(new Set());
   const [selectedSources, setSelectedSources] = useState<Set<FeedbackSource>>(
     new Set()
@@ -636,6 +732,13 @@ export function Dashboard({ items }: DashboardProps) {
   const [selectedItem, setSelectedItem] = useState<FeedbackItem | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
   const [showAbout, setShowAbout] = useState(false);
+
+  function handleUpdateItem(updated: FeedbackItem) {
+    setItems((prev) =>
+      prev.map((it) => (it.id === updated.id ? updated : it))
+    );
+    setSelectedItem(updated);
+  }
 
   const stats = useMemo(() => {
     const total = items.length;
@@ -1103,6 +1206,7 @@ export function Dashboard({ items }: DashboardProps) {
       <FeedbackDetailDialog
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
+        onUpdateItem={handleUpdateItem}
       />
       <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
     </div>

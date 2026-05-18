@@ -4,7 +4,8 @@
       "PowerShell(Move-Item *)",
       "PowerShell(New-Item *)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm install *)"
     ]
   }
 }
