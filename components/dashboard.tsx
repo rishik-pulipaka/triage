@@ -68,7 +68,6 @@ import {
   formatRICEScore,
   getSegmentLabel,
   getSourceLabel,
-  getSentimentLabel,
   getThemeLabel,
   getTypeLabel,
 } from "@/lib/utils";
